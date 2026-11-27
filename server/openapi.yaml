@@ -1,0 +1,444 @@
+openapi: 3.1.0
+info:
+  title: AshkanBoard API
+  version: 1.0.0
+servers:
+  - url: http://localhost:4000
+paths:
+  /api/health:
+    get:
+      summary: API health check
+      responses:
+        '200': { description: Service is healthy }
+  /api/health/ready:
+    get:
+      summary: Readiness probe including PostgreSQL connectivity when configured
+      responses:
+        '200': { description: Service dependencies are ready }
+        '503': { description: A required dependency is unavailable }
+  /api/auth/register:
+    post:
+      summary: Register an account and create its first workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name: { type: string, minLength: 2 }
+                email: { type: string, format: email }
+                password: { type: string, minLength: 12 }
+      responses:
+        '201': { description: Account created }
+        '400': { description: Invalid input }
+        '409': { description: Email already registered }
+  /api/auth/password/forgot:
+    post:
+      summary: Request a password reset email
+      description: Uses the configured outbound email provider. Development token output is disabled in production.
+      responses:
+        '200': { description: Generic response to avoid account enumeration }
+  /api/auth/login:
+    post:
+      summary: Login and receive an access token
+      responses:
+        '200': { description: Authenticated }
+        '401': { description: Invalid credentials }
+  /api/auth/me:
+    get:
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Current user }
+    patch:
+      summary: Update the authenticated user's display name
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 80 }
+      responses:
+        '200': { description: Updated profile }
+  /api/workspaces:
+    get:
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: User workspaces }
+  /api/workspaces/{workspaceId}/tickets:
+    parameters:
+      - in: path
+        name: workspaceId
+        required: true
+        schema: { type: string }
+    get:
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Workspace tickets }
+        '403': { description: Workspace membership required }
+    post:
+      security: [{ bearerAuth: [] }]
+      responses:
+        '201': { description: Ticket created }
+        '403': { description: Create permission required }
+  /api/workspaces/{workspaceId}/tickets/{ticketId}:
+    parameters:
+      - in: path
+        name: workspaceId
+        required: true
+        schema: { type: string }
+      - in: path
+        name: ticketId
+        required: true
+        schema: { type: string }
+    patch:
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Ticket updated }
+        '403': { description: Update permission required }
+        '404': { description: Ticket not found }
+    delete:
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Ticket deleted }
+        '403': { description: Delete permission required }
+  /api/workspaces/{workspaceId}/notifications:
+    parameters:
+      - in: path
+        name: workspaceId
+        required: true
+        schema: { type: string }
+    get:
+      security: [{ bearerAuth: [] }]
+      summary: List the current user's workspace notifications
+      responses:
+        '200': { description: Notifications and unread count }
+        '403': { description: Workspace membership required }
+  /api/workspaces/{workspaceId}/notifications/read-all:
+    patch:
+      security: [{ bearerAuth: [] }]
+      summary: Mark all current user's workspace notifications as read
+      responses:
+        '200': { description: Updated notification count }
+  /api/workspaces/{workspaceId}/imports/tickets:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Validate or import a batch of tickets using an idempotency key
+      description: In normalized persistence mode, dry-run and commit use relational membership and ticket_import_batches/tickets/workspace_audit_logs. Batch uniqueness is enforced by the workspace_id and batch_key constraint; ticket and audit writes commit atomically.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [batchKey, tickets]
+              properties:
+                mode: { type: string, enum: [dry-run, commit] }
+                batchKey: { type: string, maxLength: 120 }
+                tickets: { type: array, maxItems: 2000, items: { type: object } }
+      responses:
+        '200': { description: Dry-run validation or duplicate import response }
+        '201': { description: Import committed }
+        '400': { description: Invalid import batch }
+        '403': { description: Create permission required }
+  /api/workspaces/{workspaceId}/notifications/{notificationId}:
+    patch:
+      security: [{ bearerAuth: [] }]
+      summary: Mark one notification as read
+      parameters:
+        - in: path
+          name: workspaceId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: notificationId
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Notification marked read }
+        '404': { description: Notification not found }
+  /api/workspaces/{workspaceId}/members:
+    parameters:
+      - in: path
+        name: workspaceId
+        required: true
+        schema: { type: string }
+    get:
+      security: [{ bearerAuth: [] }]
+      summary: List workspace members
+      responses:
+        '200': { description: Workspace member list }
+        '403': { description: Member administration permission required }
+  /api/workspaces/{workspaceId}/members/{userId}:
+    patch:
+      security: [{ bearerAuth: [] }]
+      summary: Change a member role
+      parameters:
+        - in: path
+          name: workspaceId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: userId
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Role updated }
+        '403': { description: Role administration permission required }
+    delete:
+      security: [{ bearerAuth: [] }]
+      summary: Remove a workspace member
+      parameters:
+        - in: path
+          name: workspaceId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: userId
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Member removed }
+        '403': { description: Member administration permission required }
+  /api/workspaces/{workspaceId}/invitations:
+    post:
+      security: [{ bearerAuth: [] }]
+      summary: Create an invitation for an existing account
+      parameters:
+        - in: path
+          name: workspaceId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+                role: { type: string, enum: [admin, member, viewer] }
+      responses:
+        '201': { description: Invitation created }
+        '404': { description: Target account not found }
+  /api/workspaces/{workspaceId}/audit:
+    get:
+      security: [{ bearerAuth: [] }]
+      summary: List recent workspace audit events
+      parameters:
+        - in: path
+          name: workspaceId
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Audit events }
+        '403': { description: Audit permission required }
+
+  /api/workspaces/{workspaceId}/tickets/{ticketId}/comments:
+    parameters:
+      - in: path
+        name: workspaceId
+        required: true
+        schema: { type: string }
+      - in: path
+        name: ticketId
+        required: true
+        schema: { type: string }
+    get:
+      summary: List comments for a ticket
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Ticket discussion thread }
+    post:
+      summary: Add a comment and notify mentioned members
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, minLength: 1, maxLength: 5000 }
+                mentions: { type: array, items: { type: string }, maxItems: 20 }
+      responses:
+        '201': { description: Comment created }
+  /api/workspaces/{workspaceId}/tickets/{ticketId}/comments/{commentId}:
+    delete:
+      summary: Delete a comment authored by the current user (or by an administrator)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: workspaceId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: ticketId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: commentId
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Comment deleted }
+  /api/workspaces/{workspaceId}/events:
+    get:
+      summary: Authenticated workspace event stream (Server-Sent Events)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: workspaceId
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: text/event-stream live workspace events }
+        '403': { description: Workspace access denied }
+  /api/workspaces/{workspaceId}/presence:
+    parameters:
+      - in: path
+        name: workspaceId
+        required: true
+        schema: { type: string }
+    get:
+      summary: List members with a heartbeat in the last 60 seconds
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Online members }
+    post:
+      summary: Update current member presence heartbeat
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Presence updated }
+  /api/workspaces/{workspaceId}/tickets/{ticketId}/attachments:
+    parameters:
+      - in: path
+        name: workspaceId
+        required: true
+        schema: { type: string }
+      - in: path
+        name: ticketId
+        required: true
+        schema: { type: string }
+    get:
+      summary: List ticket attachments
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Attachment metadata }
+    post:
+      summary: Upload an attachment (5 MB maximum; allowlisted MIME types)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, mimeType, data]
+              properties:
+                name: { type: string, maxLength: 160 }
+                mimeType: { type: string, enum: [application/pdf, image/png, image/jpeg, image/webp, text/plain, text/csv] }
+                data: { type: string, description: Base64 data URL }
+      responses:
+        '201': { description: Attachment stored }
+        '400': { description: Unsupported type or file size }
+  /api/workspaces/{workspaceId}/tickets/{ticketId}/attachments/{attachmentId}:
+    parameters:
+      - in: path
+        name: workspaceId
+        required: true
+        schema: { type: string }
+      - in: path
+        name: ticketId
+        required: true
+        schema: { type: string }
+      - in: path
+        name: attachmentId
+        required: true
+        schema: { type: string }
+    get:
+      summary: Download or preview an attachment
+      parameters:
+        - in: query
+          name: inline
+          required: false
+          schema: { type: string, enum: ['1'] }
+          description: Allow inline rendering for PDF and image attachments only; defaults to download
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Attachment bytes; Content-Disposition remains attachment unless inline=1 is used for an allowlisted PDF or image }
+    delete:
+      summary: Delete an attachment
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Attachment deleted }
+  /api/workspaces/{workspaceId}/tickets/query:
+    get:
+      summary: Query tickets with server-side filtering, sorting and pagination
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: workspaceId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: pageSize
+          schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+        - in: query
+          name: search
+          schema: { type: string, maxLength: 120 }
+        - in: query
+          name: status
+          schema: { type: string, enum: [backlog, todo, in-progress, qa, done] }
+        - in: query
+          name: priority
+          schema: { type: string, enum: [High, Medium, Low] }
+        - in: query
+          name: sort
+          schema: { type: string, enum: [createdAt, updatedAt, title, status, priority], default: createdAt }
+        - in: query
+          name: direction
+          schema: { type: string, enum: [asc, desc], default: desc }
+      responses:
+        '200':
+          description: Filtered ticket page and pagination metadata
+        '401':
+          description: Authentication required
+        '403':
+          description: Workspace read permission required
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  /api/workspaces/{workspaceId}/export:
+    get:
+      summary: Export a workspace snapshot without credentials or private storage paths
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: workspaceId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Workspace export JSON
+        '403':
+          description: Read permission required
+        '404':
+          description: Workspace not found

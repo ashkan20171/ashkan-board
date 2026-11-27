@@ -1,0 +1,100 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ashkan_board
+      POSTGRES_USER: ashkan
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ashkan -d ashkan_board"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    image: ${ASHKAN_IMAGE:-ashkan-board:local}
+    build: .
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '5'
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      DATABASE_URL: postgresql://ashkan:${POSTGRES_PASSWORD}@db:5432/ashkan_board
+      REDIS_URL: ${REDIS_URL:-redis://:${REDIS_PASSWORD}@redis:6379/0}
+      REDIS_TIMEOUT_MS: ${REDIS_TIMEOUT_MS:-1500}
+      REDIS_CIRCUIT_FAILURE_THRESHOLD: ${REDIS_CIRCUIT_FAILURE_THRESHOLD:-3}
+      REDIS_CIRCUIT_COOLDOWN_MS: ${REDIS_CIRCUIT_COOLDOWN_MS:-15000}
+      TICKET_CACHE_TTL_SECONDS: ${TICKET_CACHE_TTL_SECONDS:-10}
+      CACHE_MEMORY_MAX_ENTRIES: ${CACHE_MEMORY_MAX_ENTRIES:-1000}
+      PG_SSL: "false"
+      PG_POOL_MAX: ${PG_POOL_MAX:-10}
+      PG_POOL_MIN: ${PG_POOL_MIN:-0}
+      PG_CONNECTION_TIMEOUT_MS: ${PG_CONNECTION_TIMEOUT_MS:-5000}
+      PG_IDLE_TIMEOUT_MS: ${PG_IDLE_TIMEOUT_MS:-30000}
+      PG_STATEMENT_TIMEOUT_MS: ${PG_STATEMENT_TIMEOUT_MS:-30000}
+      PG_QUERY_TIMEOUT_MS: ${PG_QUERY_TIMEOUT_MS:-30000}
+      PG_APPLICATION_NAME: ${PG_APPLICATION_NAME:-ashkan-board-api}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-120}
+      RATE_LIMIT_MAX_KEYS: ${RATE_LIMIT_MAX_KEYS:-10000}
+      METRICS_ENABLED: ${METRICS_ENABLED:-false}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      SHUTDOWN_TIMEOUT_MS: ${SHUTDOWN_TIMEOUT_MS:-10000}
+      PERSISTENCE_MODE: ${PERSISTENCE_MODE:-normalized}
+      CORS_ORIGIN: ${CORS_ORIGIN:?Set CORS_ORIGIN in .env}
+      APP_BASE_URL: ${APP_BASE_URL:?Set APP_BASE_URL in .env}
+      EMAIL_API_KEY: ${EMAIL_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      EMAIL_PROVIDER_URL: ${EMAIL_PROVIDER_URL:-https://api.resend.com/emails}
+      UPLOAD_DIR: /app/data/uploads
+    ports:
+      - "127.0.0.1:4000:4000"
+    volumes:
+      - ashkan_uploads:/app/data/uploads
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  redis_data:
+  postgres_data:
+  ashkan_uploads:
